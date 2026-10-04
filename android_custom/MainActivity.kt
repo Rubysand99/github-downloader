@@ -12,8 +12,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
-// Dùng FlutterFragmentActivity (thay vì FlutterActivity) vì thư viện local_auth
-// (khoá vân tay/khuôn mặt) yêu cầu FragmentActivity để hiện hộp thoại xác thực.
+// Dùng FlutterFragmentActivity. Ban đầu chọn lớp này vì thư viện local_auth (khoá vân
+// tay/khuôn mặt) cần FragmentActivity; tính năng đó đã gỡ khỏi app nên hiện không còn
+// bắt buộc. Vẫn giữ nguyên (đổi sang FlutterActivity cũng chạy được) để không đụng tới
+// cách Activity gắn với engine dùng chung bên dưới khi chưa có lý do thật sự cần.
 class MainActivity : FlutterFragmentActivity() {
     private val CHANNEL = "github_downloader/downloads"
 

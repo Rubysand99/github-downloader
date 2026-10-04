@@ -8,6 +8,7 @@
     android:padding="8dp">
 
     <TextView
+        android:id="@+id/ci_widget_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Build CI/CD"

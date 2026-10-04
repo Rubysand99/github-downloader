@@ -99,7 +99,7 @@ class _ActionsScreenState extends State<ActionsScreen> {
               Text(t('actions.run_workflow_title'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
               const SizedBox(height: 16),
               DropdownButtonFormField<GithubWorkflow>(
-                value: selectedWorkflow,
+                initialValue: selectedWorkflow,
                 decoration: InputDecoration(labelText: t('actions.workflow_label'), border: const OutlineInputBorder()),
                 items: activeWorkflows
                     .map((w) => DropdownMenuItem(value: w, child: Text(w.name, overflow: TextOverflow.ellipsis)))
@@ -108,7 +108,7 @@ class _ActionsScreenState extends State<ActionsScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: selectedBranch,
+                initialValue: selectedBranch,
                 decoration: InputDecoration(labelText: t('actions.branch_label'), border: const OutlineInputBorder()),
                 items: branches.map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))).toList(),
                 onChanged: (b) => setSheetState(() => selectedBranch = b ?? selectedBranch),

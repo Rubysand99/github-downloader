@@ -147,3 +147,54 @@ upload.
     màn hình) khi đang ở gốc repo (`_currentPath` rỗng); nếu đang ở thư mục
     con thì nút back sẽ gọi hàm mới `_navigateUpOneLevel()` để lùi đúng 1 cấp
     thư mục cha (`"a/b/c"` -> `"a/b"`) thay vì thoát luôn.
+
+## Đợt sửa lớn (rà soát toàn bộ repo)
+
+19. **Thông báo "build xong" gần như không bao giờ kêu** — `lib/services/keep_alive_service.dart`.
+    Code cũ bỏ qua mọi lần chạy chưa xong, nên lần đầu thấy 1 lần chạy là lúc nó đã xong, và bị
+    coi là "mốc" (không báo). Nay run chưa xong cũng được ghi nhận là `running`; khi chuyển sang
+    xong thì báo. Build rất nhanh (xong giữa 2 lần kiểm tra) vẫn được báo nếu mới tạo dưới 10
+    phút. Mỗi repo có "mốc" riêng, lần quét đầu chỉ ghi nhận để không báo dồn build cũ. Token bị
+    thu hồi thì tự dừng theo dõi thay vì báo lỗi mỗi phút.
+
+20. **Đăng xuất không đưa về màn đăng nhập** — `repo_list_screen.dart`, `browser_screen.dart`.
+    Trước đây chỉ `popUntil(isFirst)`, mà màn danh sách repo chính là màn đầu tiên nên không có gì
+    thay đổi. Nay thay hẳn stack bằng `LoginScreen`.
+
+21. **Đăng xuất không dọn sạch** — `auth_service.dart`, `ci_watch_service.dart`, `widget_service.dart`,
+    `session_cache.dart` (mới). Trước đây: dịch vụ theo dõi CI nền vẫn chạy với token cũ; widget vẫn
+    hiện tên repo private; cache trong RAM vẫn còn; và `deleteAll()` xoá luôn cả cài đặt app lẫn
+    danh sách repo đã ghim. Nay `logout()` tắt theo dõi CI, làm trống widget, xoá mọi cache đã đăng
+    ký với `SessionCache`, và chỉ xoá đúng 3 khoá đăng nhập.
+
+22. **Token bị sao chép ra nơi lưu chữ thường** — `ci_watch_service.dart`, `keep_alive_service.dart`.
+    README cam kết token chỉ nằm trong kho mã hoá nhưng code từng chép thêm 1 bản vào
+    `FlutterForegroundTask.saveData` (SharedPreferences). Nay bỏ bản sao, tác vụ nền tự đọc token từ
+    `flutter_secure_storage`; bản sao cũ trên máy được ghi đè bằng chuỗi rỗng khi bật/tắt tính năng.
+    LƯU Ý: phần đọc token trong tác vụ nền chưa thử trên máy thật — nếu thông báo CI không kêu sau
+    bản này, hãy xem mục này đầu tiên.
+
+23. **Lưu/tải file lên ở thư mục gốc làm nhảy về branch mặc định** — `browser_screen.dart`.
+    Gọi `_loadRepo()` (đặt lại branch) thay vì `_loadRootContents()`. Đã sửa cả 2 chỗ.
+
+24. **Tải artifact lớn tốn RAM** — `github_service.dart`, `downloads_service.dart`. Gom dữ liệu bằng
+    `BytesBuilder` thay vì `List<int>` (tốn ~8 byte RAM cho mỗi byte); không còn nhân đôi dữ liệu
+    khi gửi sang Kotlin.
+
+25. **Lỗi lưu file bị nuốt mất lý do** — `downloads_service.dart`, `download_manager.dart`. Lý do thật
+    được lưu vào `DownloadsService.lastError`, ghi vào log và hiện kèm trong thông báo.
+
+26. **Check `dart.yml` dễ đỏ oan** — 5 chỗ `DropdownButtonFormField(value:)` (đã lỗi thời) đổi sang
+    `initialValue:` ở `repo_list_screen.dart`, `actions_screen.dart`, `repo_admin_screen.dart`; bước
+    analyze thêm `--no-fatal-infos --no-fatal-warnings` để chỉ lỗi thật mới làm đỏ.
+
+27. **Chữ tiếng Việt viết cứng** — ~90 thông báo lỗi GitHub, thông báo build CI, thông báo dịch vụ
+    nền, lỗi đăng nhập, và chữ trên widget nay đi qua `t()` (có bản tiếng Anh). Riêng dòng log nội bộ
+    giữ tiếng Việt. Widget nhận chữ từ Dart qua `HomeWidget.saveWidgetData`.
+
+28. **Dọn vặt**: viết lại README cho đúng thực tế; sửa ghi chú cũ trong `MainActivity.kt`; xoá 7 khoá
+    dịch không dùng; dispose 2 controller trong `BrowserScreen`; widget được làm trống khi bỏ ghim hết
+    (nhưng giữ dữ liệu cũ khi chỉ mất mạng).
+
+Chưa chạy `flutter analyze`/build thật khi viết đợt này (môi trường viết không có Flutter); mới kiểm
+tra cú pháp Dart bằng bộ phân tích riêng và đối chiếu khoá dịch. Hãy để GitHub Actions build thử.

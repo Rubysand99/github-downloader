@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/auth_service.dart';
+import '../services/session_cache.dart';
 import '../services/github_service.dart';
 import '../services/downloads_service.dart';
 import '../services/download_manager.dart';
@@ -24,6 +25,7 @@ const int _bigDateSortWarningThreshold = 50;
 /// ngay, đồng thời âm thầm gọi API lấy bản mới nhất để cập nhật lại phía sau.
 class _FolderCache {
   static final Map<String, List<GithubFile>> _cache = {};
+  static bool _registered = false;
 
   static String _key(String owner, String repo, String? branch, String path) => '$owner/$repo/${branch ?? ''}/$path';
 
@@ -31,6 +33,11 @@ class _FolderCache {
       _cache[_key(owner, repo, branch, path)];
 
   static void set(String owner, String repo, String? branch, String path, List<GithubFile> files) {
+    // Đăng ký để SessionCache.clearAll() (gọi lúc đăng xuất) xoá được cache này.
+    if (!_registered) {
+      _registered = true;
+      SessionCache.register(_cache.clear);
+    }
     _cache[_key(owner, repo, branch, path)] = files;
   }
 }
@@ -113,6 +120,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _ownerController.dispose();
+    _repoController.dispose();
     super.dispose();
   }
 
@@ -316,7 +325,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
     if (saved == true && mounted) {
       if (_currentPath.isEmpty) {
-        await _loadRepo();
+        // Không dùng _loadRepo(): hàm đó đặt lại branch về mặc định, làm màn hình
+        // nhảy khỏi branch người dùng đang xem.
+        await _loadRootContents();
       } else {
         await _openFolder(_currentPath);
       }
@@ -593,7 +604,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (success == true && mounted) {
       showTopNotification(context, t('browser.upload_success'));
       if (_currentPath.isEmpty) {
-        await _loadRepo();
+        await _loadRootContents(); // giữ nguyên branch đang xem (xem ghi chú ở _previewFile)
       } else {
         await _openFolder(_currentPath);
       }
@@ -705,8 +716,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _logout() async {
-    await _authService.logout();
-    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    await _authService.logout(); // đã xoá sạch cache + dịch vụ nền, xem AuthService.logout
+    if (!mounted) return;
+    // Trước đây chỉ popUntil(isFirst) -> quay về danh sách repo (chính là màn đầu
+    // tiên) chứ không sang màn đăng nhập. Phải thay hẳn toàn bộ stack.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   /// Bottom sheet "Thông tin repo": trạng thái star/watch (bật/tắt được),

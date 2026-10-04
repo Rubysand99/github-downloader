@@ -1,13 +1,15 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
+import '../l10n/strings.dart';
 import 'log_service.dart';
 
 /// Lỗi riêng cho trường hợp token hết hạn / bị thu hồi (401),
 /// để UI có thể bắt riêng và tự động đăng xuất.
 class GithubUnauthorizedException implements Exception {
   final String message;
-  GithubUnauthorizedException([this.message = 'Phiên đăng nhập đã hết hạn hoặc bị thu hồi.']);
+  GithubUnauthorizedException([String? message]) : message = message ?? t('err.session_expired');
   @override
   String toString() => message;
 }
@@ -77,10 +79,10 @@ class GithubRepo {
 
   /// Mô tả quyền hạn dạng dễ hiểu để hiển thị lên UI.
   String get permissionLabel {
-    if (canAdmin) return 'Admin';
-    if (canPush) return 'Ghi (Write)';
-    if (canPull) return 'Chỉ đọc (Read-only)';
-    return 'Không rõ';
+    if (canAdmin) return t('repolist.perm_admin');
+    if (canPush) return t('repolist.perm_write');
+    if (canPull) return t('repolist.perm_read');
+    return t('repolist.perm_unknown');
   }
 
   factory GithubRepo.fromJson(Map<String, dynamic> json) {
@@ -229,7 +231,7 @@ class GithubCommit {
     return GithubCommit(
       sha: json['sha'] ?? '',
       message: commit['message'] ?? '',
-      authorName: json['author']?['login'] ?? author['name'] ?? 'Không rõ',
+      authorName: json['author']?['login'] ?? author['name'] ?? t('common.unknown'),
       date: DateTime.parse(author['date'] ?? DateTime.now().toIso8601String()),
       htmlUrl: json['html_url'] ?? '',
     );
@@ -542,7 +544,7 @@ class GithubService {
         await Future.delayed(Duration(seconds: delaySeconds));
       }
     }
-    throw Exception('Thất bại sau $maxAttempts lần thử');
+    throw Exception(t('err.retry_failed', {'n': '$maxAttempts'}));
   }
 
   void _checkStatus(http.Response response, String contextMessage) {
@@ -552,7 +554,7 @@ class GithubService {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       LogService.instance.warn('GitHub API lỗi ${response.statusCode}: $contextMessage');
-      throw Exception('$contextMessage (mã lỗi ${response.statusCode})');
+      throw Exception(t('err.with_code', {'msg': contextMessage, 'code': '${response.statusCode}'}));
     }
   }
 
@@ -570,7 +572,7 @@ class GithubService {
 
       while (url != null) {
         final response = await http.get(url, headers: _headers);
-        _checkStatus(response, 'Không lấy được danh sách repo');
+        _checkStatus(response, t('err.repo_list'));
 
         final List data = jsonDecode(response.body);
         repos.addAll(data.map((e) => GithubRepo.fromJson(e)));
@@ -599,7 +601,7 @@ class GithubService {
       final query = ref != null ? <String, String>{'ref': ref} : null;
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/contents/$path', query);
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được nội dung repo. Repo có thể là private, không tồn tại, hoặc token không đủ quyền.');
+      _checkStatus(response, t('err.contents'));
 
       final List data = jsonDecode(response.body);
       return data.map((e) => GithubFile.fromJson(e)).toList();
@@ -613,7 +615,7 @@ class GithubService {
       final query = ref != null ? <String, String>{'ref': ref} : null;
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/contents/$path', query);
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được thông tin file');
+      _checkStatus(response, t('err.file_meta'));
       return GithubFile.fromJson(jsonDecode(response.body));
     });
   }
@@ -622,7 +624,7 @@ class GithubService {
   Future<String> getDefaultBranch(String owner, String repo) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo');
     final response = await http.get(url, headers: _headers);
-    _checkStatus(response, 'Không lấy được thông tin repo');
+    _checkStatus(response, t('err.repo_info'));
     final data = jsonDecode(response.body);
     return data['default_branch'] ?? 'main';
   }
@@ -632,7 +634,7 @@ class GithubService {
   Future<GithubRepo> getRepoDetails(String owner, String repo) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo');
     final response = await http.get(url, headers: _headers);
-    _checkStatus(response, 'Không lấy được thông tin repo');
+    _checkStatus(response, t('err.repo_info'));
     return GithubRepo.fromJson(jsonDecode(response.body));
   }
 
@@ -641,7 +643,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/branches', {'per_page': '100'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách branch');
+      _checkStatus(response, t('err.branches'));
       final List data = jsonDecode(response.body);
       return data.map((e) => e['name'] as String).toList();
     });
@@ -664,7 +666,7 @@ class GithubService {
         queryParameters: {'recursive': '1'},
       );
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không tìm kiếm được trong repo');
+      _checkStatus(response, t('err.search_repo'));
 
       final data = jsonDecode(response.body);
       final List tree = data['tree'] ?? [];
@@ -680,7 +682,7 @@ class GithubService {
   Future<List<int>> downloadFile(String downloadUrl) async {
     return _withRetry(() async {
       final response = await http.get(Uri.parse(downloadUrl), headers: _headers);
-      _checkStatus(response, 'Tải file thất bại');
+      _checkStatus(response, t('err.download_file'));
       return response.bodyBytes;
     });
   }
@@ -740,7 +742,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/runs', {'per_page': '30'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được trạng thái Actions');
+      _checkStatus(response, t('err.runs'));
       final data = jsonDecode(response.body);
       final List runs = data['workflow_runs'] ?? [];
       return runs.map((e) => WorkflowRun.fromJson(e)).toList();
@@ -752,7 +754,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/commits', {'per_page': '30'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được lịch sử commit');
+      _checkStatus(response, t('err.commits'));
       final List data = jsonDecode(response.body);
       return data.map((e) => GithubCommit.fromJson(e)).toList();
     });
@@ -764,7 +766,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/commits', {'path': path, 'per_page': '1'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được ngày sửa đổi');
+      _checkStatus(response, t('err.last_commit'));
       final List data = jsonDecode(response.body);
       if (data.isEmpty) return null;
       final dateStr = data[0]['commit']?['author']?['date'];
@@ -777,7 +779,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/runs/$runId/jobs');
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách job');
+      _checkStatus(response, t('err.jobs'));
       final data = jsonDecode(response.body);
       final List jobs = data['jobs'] ?? [];
       return jobs.map((e) => WorkflowJob.fromJson(e)).toList();
@@ -789,7 +791,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/jobs/$jobId/logs');
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được log');
+      _checkStatus(response, t('err.logs'));
       return response.body;
     });
   }
@@ -799,7 +801,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/runs/$runId/artifacts');
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được artifact');
+      _checkStatus(response, t('err.artifacts'));
       final data = jsonDecode(response.body);
       final List artifacts = data['artifacts'] ?? [];
       return artifacts.map((e) => Artifact.fromJson(e)).toList();
@@ -834,7 +836,7 @@ class GithubService {
         if (streamedResponse.statusCode == 301 || streamedResponse.statusCode == 302 || streamedResponse.statusCode == 303) {
           final location = streamedResponse.headers['location'];
           if (location == null) {
-            throw Exception('Không tìm thấy địa chỉ chuyển hướng khi tải artifact');
+            throw Exception(t('err.artifact_redirect'));
           }
           final redirectRequest = http.Request('GET', Uri.parse(location));
           streamedResponse = await client.send(redirectRequest);
@@ -842,23 +844,30 @@ class GithubService {
 
         if (streamedResponse.statusCode == 401) throw GithubUnauthorizedException();
         if (streamedResponse.statusCode < 200 || streamedResponse.statusCode >= 300) {
-          throw Exception('Tải artifact thất bại (mã lỗi ${streamedResponse.statusCode})');
+          throw Exception(t('err.artifact_failed', {'code': '${streamedResponse.statusCode}'}));
         }
 
         final total = streamedResponse.contentLength;
-        final bytes = <int>[];
+        // Gom dữ liệu bằng BytesBuilder (mỗi byte chiếm đúng 1 byte RAM) thay vì
+        // List<int> thường - List<int> tốn khoảng 8 byte RAM cho mỗi byte dữ liệu,
+        // nên artifact ~50MB có thể ngốn hàng trăm MB và làm máy yếu bị đóng app.
+        final builder = BytesBuilder(copy: false);
+        var received = 0;
         await for (final chunk in streamedResponse.stream) {
-          bytes.addAll(chunk);
-          onProgress?.call(bytes.length, total);
+          builder.add(chunk);
+          received += chunk.length;
+          onProgress?.call(received, total);
         }
 
         // Nếu server có báo trước tổng dung lượng, kiểm tra tải đủ chưa - tránh
         // lưu nhầm file zip bị cắt cụt giữa chừng (gây lỗi khi giải nén).
-        if (total != null && bytes.length != total) {
-          throw Exception('Connection closed while receiving data (tải thiếu $total - ${bytes.length} bytes)');
+        // Giữ nguyên cụm "Connection closed" ở đầu: _withRetry dựa vào cụm này để
+        // nhận ra lỗi mạng và tự thử lại.
+        if (total != null && received != total) {
+          throw Exception('Connection closed while receiving data (incomplete download: got $received of $total bytes)');
         }
 
-        return bytes;
+        return builder.takeBytes();
       } finally {
         client.close();
       }
@@ -889,9 +898,9 @@ class GithubService {
       }),
     );
     if (response.statusCode == 409) {
-      throw Exception('File đã bị thay đổi ở nơi khác (conflict). Hãy mở lại file để lấy bản mới nhất rồi sửa lại.');
+      throw Exception(t('err.update_conflict'));
     }
-    _checkStatus(response, 'Lưu file thất bại');
+    _checkStatus(response, t('err.save_file'));
   }
 
   /// Tải 1 file MỚI (chưa tồn tại trong repo) lên, dùng cho tính năng "tải file từ máy lên repo".
@@ -915,9 +924,9 @@ class GithubService {
       }),
     );
     if (response.statusCode == 422) {
-      throw Exception('Đã tồn tại file tại đường dẫn này. Đổi tên khác hoặc dùng tính năng sửa file để ghi đè.');
+      throw Exception(t('err.upload_exists'));
     }
-    _checkStatus(response, 'Tải file lên thất bại');
+    _checkStatus(response, t('err.upload_failed'));
   }
 
   /// Lấy danh sách thông báo. [all]=false chỉ trả về thông báo CHƯA ĐỌC (mặc định
@@ -930,9 +939,9 @@ class GithubService {
       final url = Uri.https('api.github.com', '/notifications', {'all': all.toString(), 'per_page': '50'});
       final response = await http.get(url, headers: _headers);
       if (response.statusCode == 404) {
-        throw Exception('Không lấy được thông báo (404). Tài khoản có thể cần đăng nhập lại để cấp thêm quyền đọc thông báo.');
+        throw Exception(t('err.notif_404'));
       }
-      _checkStatus(response, 'Không lấy được thông báo');
+      _checkStatus(response, t('err.notifs'));
       final List data = jsonDecode(response.body);
       return data.map((e) => GithubNotification.fromJson(e)).toList();
     });
@@ -942,14 +951,14 @@ class GithubService {
   Future<void> markNotificationRead(String threadId) async {
     final url = Uri.https('api.github.com', '/notifications/threads/$threadId');
     final response = await http.patch(url, headers: _headers);
-    _checkStatus(response, 'Không đánh dấu đã đọc được');
+    _checkStatus(response, t('err.mark_read'));
   }
 
   /// Đánh dấu TOÀN BỘ thông báo là đã đọc.
   Future<void> markAllNotificationsRead() async {
     final url = Uri.https('api.github.com', '/notifications');
     final response = await http.put(url, headers: {..._headers, 'Content-Type': 'application/json'}, body: jsonEncode({}));
-    _checkStatus(response, 'Không đánh dấu tất cả đã đọc được');
+    _checkStatus(response, t('err.mark_all_read'));
   }
 
   // ================== #3: Xoá file / thư mục ==================
@@ -975,9 +984,9 @@ class GithubService {
       }),
     );
     if (response.statusCode == 409) {
-      throw Exception('File đã bị thay đổi ở nơi khác (conflict). Hãy làm mới danh sách rồi thử lại.');
+      throw Exception(t('err.delete_conflict'));
     }
-    _checkStatus(response, 'Xoá file thất bại');
+    _checkStatus(response, t('err.delete_file'));
   }
 
   /// Xoá TOÀN BỘ file bên trong 1 thư mục (đệ quy). GitHub Contents API không
@@ -1016,7 +1025,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/workflows', {'per_page': '100'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách workflow');
+      _checkStatus(response, t('err.workflows'));
       final data = jsonDecode(response.body);
       final List items = data['workflows'] ?? [];
       return items.map((e) => GithubWorkflow.fromJson(e)).toList();
@@ -1042,33 +1051,33 @@ class GithubService {
       }),
     );
     if (response.statusCode == 404) {
-      throw Exception('Không chạy được workflow (404) - workflow này có thể chưa khai báo trigger "workflow_dispatch" trong file yml.');
+      throw Exception(t('err.dispatch_404'));
     }
     if (response.statusCode == 422) {
-      throw Exception('Không chạy được workflow (422) - kiểm tra lại tên branch/tham số truyền vào.');
+      throw Exception(t('err.dispatch_422'));
     }
-    _checkStatus(response, 'Kích hoạt workflow thất bại');
+    _checkStatus(response, t('err.dispatch'));
   }
 
   /// Huỷ 1 lần chạy Actions đang chờ hoặc đang chạy dở.
   Future<void> cancelWorkflowRun(String owner, String repo, int runId) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/runs/$runId/cancel');
     final response = await http.post(url, headers: _headers);
-    _checkStatus(response, 'Huỷ workflow thất bại');
+    _checkStatus(response, t('err.cancel_run'));
   }
 
   /// Chạy lại TOÀN BỘ 1 lần chạy Actions đã kết thúc (kể cả các job đã thành công).
   Future<void> rerunWorkflowRun(String owner, String repo, int runId) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/runs/$runId/rerun');
     final response = await http.post(url, headers: _headers);
-    _checkStatus(response, 'Chạy lại workflow thất bại');
+    _checkStatus(response, t('err.rerun'));
   }
 
   /// Chỉ chạy lại các job BỊ LỖI của 1 lần chạy Actions (nhanh hơn rerun toàn bộ).
   Future<void> rerunFailedJobs(String owner, String repo, int runId) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/actions/runs/$runId/rerun-failed-jobs');
     final response = await http.post(url, headers: _headers);
-    _checkStatus(response, 'Chạy lại job lỗi thất bại');
+    _checkStatus(response, t('err.rerun_failed'));
   }
 
   // ================== #10: Collaborators & Webhooks ==================
@@ -1079,7 +1088,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/collaborators', {'per_page': '100'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách collaborator');
+      _checkStatus(response, t('err.collaborators'));
       final List data = jsonDecode(response.body);
       return data.map((e) => Collaborator.fromJson(e)).toList();
     });
@@ -1096,15 +1105,15 @@ class GithubService {
       body: jsonEncode({'permission': permission}),
     );
     if (response.statusCode == 404) {
-      throw Exception('Không tìm thấy tài khoản GitHub "$username".');
+      throw Exception(t('err.user_not_found', {'username': username}));
     }
-    _checkStatus(response, 'Thêm collaborator thất bại');
+    _checkStatus(response, t('err.add_collaborator'));
   }
 
   Future<void> removeCollaborator(String owner, String repo, String username) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/collaborators/$username');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Xoá collaborator thất bại');
+    _checkStatus(response, t('err.remove_collaborator'));
   }
 
   /// Liệt kê webhook đã cấu hình trên repo.
@@ -1112,7 +1121,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/hooks');
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách webhook');
+      _checkStatus(response, t('err.webhooks'));
       final List data = jsonDecode(response.body);
       return data.map((e) => GithubWebhook.fromJson(e)).toList();
     });
@@ -1143,13 +1152,13 @@ class GithubService {
         },
       }),
     );
-    _checkStatus(response, 'Tạo webhook thất bại');
+    _checkStatus(response, t('err.create_webhook'));
   }
 
   Future<void> deleteWebhook(String owner, String repo, int hookId) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/hooks/$hookId');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Xoá webhook thất bại');
+    _checkStatus(response, t('err.delete_webhook'));
   }
 
   Future<void> toggleWebhookActive(String owner, String repo, int hookId, bool active) async {
@@ -1159,7 +1168,7 @@ class GithubService {
       headers: {..._headers, 'Content-Type': 'application/json'},
       body: jsonEncode({'active': active}),
     );
-    _checkStatus(response, 'Cập nhật webhook thất bại');
+    _checkStatus(response, t('err.update_webhook'));
   }
 
   // ================== #11: Tìm kiếm code toàn GitHub ==================
@@ -1179,12 +1188,12 @@ class GithubService {
       });
       final response = await http.get(url, headers: _headers);
       if (response.statusCode == 403) {
-        throw Exception('Đã vượt giới hạn tìm kiếm của GitHub (10 lần/phút). Đợi 1 chút rồi thử lại.');
+        throw Exception(t('err.search_rate_limit'));
       }
       if (response.statusCode == 422) {
-        throw Exception('Cú pháp tìm kiếm không hợp lệ. Ví dụ: "TODO language:dart" hoặc "useState repo:facebook/react".');
+        throw Exception(t('err.search_syntax'));
       }
-      _checkStatus(response, 'Tìm kiếm code thất bại');
+      _checkStatus(response, t('err.search_code'));
       final data = jsonDecode(response.body);
       final List items = data['items'] ?? [];
       return items.map((e) => CodeSearchResult.fromJson(e)).toList();
@@ -1201,8 +1210,7 @@ class GithubService {
     final fullQuery = '$query ($repoQualifier)';
     // GitHub giới hạn cứng 256 ký tự/query - báo lỗi rõ ràng thay vì để GitHub trả 422 khó hiểu.
     if (fullQuery.length > 256) {
-      throw Exception(
-          'Bạn đang ghim quá nhiều repo (tên repo quá dài khi gộp lại), GitHub giới hạn 256 ký tự/lần tìm. Hãy bỏ ghim bớt vài repo rồi thử lại.');
+      throw Exception(t('err.too_many_pins'));
     }
     return searchCodeGlobal(fullQuery);
   }
@@ -1242,9 +1250,9 @@ class GithubService {
       }),
     );
     if (response.statusCode == 422) {
-      throw Exception('Không tạo được repo (422) - có thể đã tồn tại repo cùng tên.');
+      throw Exception(t('err.create_repo_422'));
     }
-    _checkStatus(response, 'Tạo repo thất bại');
+    _checkStatus(response, t('err.create_repo'));
     return GithubRepo.fromJson(jsonDecode(response.body));
   }
 
@@ -1256,9 +1264,9 @@ class GithubService {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo');
     final response = await http.delete(url, headers: _headers);
     if (response.statusCode == 403) {
-      throw Exception('Không có quyền xoá repo (403) - hãy đăng xuất rồi đăng nhập lại để cấp thêm quyền "delete_repo".');
+      throw Exception(t('err.delete_repo_403'));
     }
-    _checkStatus(response, 'Xoá repo thất bại');
+    _checkStatus(response, t('err.delete_repo'));
   }
 
   /// Cập nhật cài đặt cơ bản của repo: mô tả, công khai/riêng tư, đổi tên.
@@ -1279,14 +1287,14 @@ class GithubService {
         if (newName != null && newName.isNotEmpty) 'name': newName,
       }),
     );
-    _checkStatus(response, 'Cập nhật cài đặt repo thất bại');
+    _checkStatus(response, t('err.update_repo'));
   }
 
   /// Lấy danh sách topic (thẻ gắn cho repo) hiện có.
   Future<List<String>> getRepoTopics(String owner, String repo) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/topics');
     final response = await http.get(url, headers: {..._headers, 'Accept': 'application/vnd.github.mercy-preview+json'});
-    _checkStatus(response, 'Không lấy được topic');
+    _checkStatus(response, t('err.topics'));
     final data = jsonDecode(response.body);
     final List names = data['names'] ?? [];
     return names.map((e) => e.toString()).toList();
@@ -1300,7 +1308,7 @@ class GithubService {
       headers: {..._headers, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github.mercy-preview+json'},
       body: jsonEncode({'names': topics}),
     );
-    _checkStatus(response, 'Cập nhật topic thất bại');
+    _checkStatus(response, t('err.set_topics'));
   }
 
   // ================== #12: Gists, hồ sơ người dùng, follow ==================
@@ -1310,7 +1318,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/gists', {'per_page': '50'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách gist');
+      _checkStatus(response, t('err.gists'));
       final List data = jsonDecode(response.body);
       return data.map((e) => GithubGist.fromJson(e)).toList();
     });
@@ -1329,14 +1337,14 @@ class GithubService {
         'files': files.map((name, content) => MapEntry(name, {'content': content})),
       }),
     );
-    _checkStatus(response, 'Tạo gist thất bại');
+    _checkStatus(response, t('err.create_gist'));
     return GithubGist.fromJson(jsonDecode(response.body));
   }
 
   Future<void> deleteGist(String gistId) async {
     final url = Uri.https('api.github.com', '/gists/$gistId');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Xoá gist thất bại');
+    _checkStatus(response, t('err.delete_gist'));
   }
 
   /// Lấy thông tin công khai của 1 tài khoản GitHub bất kỳ (xem hồ sơ người khác).
@@ -1345,9 +1353,9 @@ class GithubService {
       final url = Uri.https('api.github.com', '/users/$username');
       final response = await http.get(url, headers: _headers);
       if (response.statusCode == 404) {
-        throw Exception('Không tìm thấy tài khoản GitHub "$username".');
+        throw Exception(t('err.user_not_found', {'username': username}));
       }
-      _checkStatus(response, 'Không lấy được thông tin người dùng');
+      _checkStatus(response, t('err.user_profile'));
       return GithubUserProfile.fromJson(jsonDecode(response.body));
     });
   }
@@ -1358,7 +1366,7 @@ class GithubService {
     final response = await http.get(url, headers: _headers);
     if (response.statusCode == 204) return true;
     if (response.statusCode == 404) return false;
-    _checkStatus(response, 'Không kiểm tra được trạng thái theo dõi');
+    _checkStatus(response, t('err.following_check'));
     return false;
   }
 
@@ -1367,15 +1375,15 @@ class GithubService {
     final url = Uri.https('api.github.com', '/user/following/$username');
     final response = await http.put(url, headers: {..._headers, 'Content-Type': 'application/json'});
     if (response.statusCode == 403) {
-      throw Exception('Không có quyền theo dõi (403) - hãy đăng xuất rồi đăng nhập lại để cấp thêm quyền "user:follow".');
+      throw Exception(t('err.follow_403'));
     }
-    _checkStatus(response, 'Theo dõi thất bại');
+    _checkStatus(response, t('err.follow'));
   }
 
   Future<void> unfollowUser(String username) async {
     final url = Uri.https('api.github.com', '/user/following/$username');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Bỏ theo dõi thất bại');
+    _checkStatus(response, t('err.unfollow'));
   }
 
   // ================== #1: Star / Watch / Fork ==================
@@ -1386,20 +1394,20 @@ class GithubService {
     final response = await http.get(url, headers: _headers);
     if (response.statusCode == 204) return true;
     if (response.statusCode == 404) return false;
-    _checkStatus(response, 'Không kiểm tra được trạng thái star');
+    _checkStatus(response, t('err.star_check'));
     return false;
   }
 
   Future<void> starRepo(String owner, String repo) async {
     final url = Uri.https('api.github.com', '/user/starred/$owner/$repo');
     final response = await http.put(url, headers: {..._headers, 'Content-Type': 'application/json'});
-    _checkStatus(response, 'Gắn sao thất bại');
+    _checkStatus(response, t('err.star'));
   }
 
   Future<void> unstarRepo(String owner, String repo) async {
     final url = Uri.https('api.github.com', '/user/starred/$owner/$repo');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Bỏ sao thất bại');
+    _checkStatus(response, t('err.unstar'));
   }
 
   /// Đang "theo dõi" (watch) repo hay chưa đặt (mặc định theo dõi khi có
@@ -1409,7 +1417,7 @@ class GithubService {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/subscription');
     final response = await http.get(url, headers: _headers);
     if (response.statusCode == 404) return false;
-    _checkStatus(response, 'Không kiểm tra được trạng thái theo dõi repo');
+    _checkStatus(response, t('err.watch_check'));
     final data = jsonDecode(response.body);
     return data['subscribed'] == true;
   }
@@ -1421,14 +1429,14 @@ class GithubService {
       headers: {..._headers, 'Content-Type': 'application/json'},
       body: jsonEncode({'subscribed': true, 'ignored': false}),
     );
-    _checkStatus(response, 'Theo dõi repo thất bại');
+    _checkStatus(response, t('err.watch'));
   }
 
   /// Bỏ theo dõi - xoá bản ghi subscription, trở về hành vi mặc định của GitHub.
   Future<void> unwatchRepo(String owner, String repo) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/subscription');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Bỏ theo dõi repo thất bại');
+    _checkStatus(response, t('err.unwatch'));
   }
 
   /// Fork repo về tài khoản cá nhân đang đăng nhập. GitHub tạo fork BẤT ĐỒNG
@@ -1438,7 +1446,7 @@ class GithubService {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/forks');
     final response = await http.post(url, headers: _headers);
     if (response.statusCode != 202 && response.statusCode != 200) {
-      _checkStatus(response, 'Fork repo thất bại');
+      _checkStatus(response, t('err.fork'));
     }
   }
 
@@ -1449,7 +1457,7 @@ class GithubService {
     return _withRetry(() async {
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/releases', {'per_page': '30'});
       final response = await http.get(url, headers: _headers);
-      _checkStatus(response, 'Không lấy được danh sách release');
+      _checkStatus(response, t('err.releases'));
       final List data = jsonDecode(response.body);
       return data.map((e) => GithubRelease.fromJson(e)).toList();
     });
@@ -1481,15 +1489,15 @@ class GithubService {
       }),
     );
     if (response.statusCode == 422) {
-      throw Exception('Không tạo được release (422) - tag "$tagName" có thể đã được dùng cho release khác.');
+      throw Exception(t('err.create_release_422', {'tag': tagName}));
     }
-    _checkStatus(response, 'Tạo release thất bại');
+    _checkStatus(response, t('err.create_release'));
   }
 
   Future<void> deleteRelease(String owner, String repo, int releaseId) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/releases/$releaseId');
     final response = await http.delete(url, headers: _headers);
-    _checkStatus(response, 'Xoá release thất bại');
+    _checkStatus(response, t('err.delete_release'));
   }
 
   /// Tải nội dung 1 asset của release. Asset trên repo PRIVATE cần gọi qua
@@ -1498,7 +1506,7 @@ class GithubService {
   Future<List<int>> downloadReleaseAsset(String owner, String repo, int assetId) async {
     final url = Uri.https('api.github.com', '/repos/$owner/$repo/releases/assets/$assetId');
     final response = await http.get(url, headers: {..._headers, 'Accept': 'application/octet-stream'});
-    _checkStatus(response, 'Tải asset thất bại');
+    _checkStatus(response, t('err.download_asset'));
     return response.bodyBytes;
   }
 
@@ -1527,7 +1535,7 @@ class GithubService {
   Future<String> getGitignoreTemplate(String name) async {
     final url = Uri.https('api.github.com', '/gitignore/templates/$name');
     final response = await http.get(url, headers: _headers);
-    _checkStatus(response, 'Không lấy được mẫu .gitignore');
+    _checkStatus(response, t('err.gitignore_template'));
     final data = jsonDecode(response.body);
     return data['source'] ?? '';
   }
@@ -1537,7 +1545,7 @@ class GithubService {
   Future<String> getLicenseTemplate(String key) async {
     final url = Uri.https('api.github.com', '/licenses/$key');
     final response = await http.get(url, headers: _headers);
-    _checkStatus(response, 'Không lấy được mẫu LICENSE');
+    _checkStatus(response, t('err.license_template'));
     final data = jsonDecode(response.body);
     return data['body'] ?? '';
   }

@@ -1,63 +1,31 @@
-# GitHub Repo Downloader — Hướng dẫn setup
+# GitHub Repo Downloader
 
-## Tổng quan
-- `github_downloader/`: app Flutter, đăng nhập GitHub, duyệt và tải file repo. Build APK tự động qua GitHub Actions.
-- `oauth_backend/`: server FastAPI nhỏ, chỉ có 1 nhiệm vụ là đổi OAuth `code` lấy `access_token` (giữ `client_secret` an toàn, không để trong app).
+App Android (Flutter) làm "GitHub trên điện thoại": đăng nhập GitHub, duyệt repo, xem/sửa/xoá/tải file lên (mỗi lần lưu là 1 commit), tải file hoặc cả thư mục dạng zip, xem và điều khiển GitHub Actions (xem log, tải artifact, chạy lại, huỷ), tìm code, xem commit, quản lý release/gist/collaborator/webhook, nhận thông báo GitHub, ghim repo, và nhận thông báo khi build CI của repo đã ghim chạy xong. App có tiếng Việt và tiếng Anh.
 
-## Bước 1: Tạo GitHub OAuth App
-1. Vào https://github.com/settings/developers → **New OAuth App**
-2. Điền:
-   - **Application name**: tuỳ ý (vd: TuyTam Repo Downloader)
-   - **Homepage URL**: `https://github.com` (hoặc bất kỳ URL nào)
-   - **Authorization callback URL**: `githubdownloader://callback`
-3. Bấm **Register application** → lấy **Client ID**
-4. Bấm **Generate a new client secret** → lấy **Client Secret** (chỉ hiện 1 lần, lưu lại ngay)
+## Cấu trúc repo
+- `lib/` — toàn bộ code Dart của app.
+- `android_custom/` — code Kotlin và file giao diện widget cho Android. Thư mục `android/` **không** nằm trong repo (đã ghi trong `.gitignore`): GitHub Actions tự tạo bằng `flutter create`, rồi chép các file trong `android_custom/` vào.
+- `.github/workflows/build_apk.yml` — build APK bản release.
+- `.github/workflows/dart.yml` — kiểm tra code (`flutter analyze`), chỉ báo đỏ khi có lỗi thật.
+- `SUA_LOI.md` — nhật ký các lần sửa lỗi.
+- Server đổi mã đăng nhập (FastAPI) **nằm ở repo riêng**, không có trong repo này.
 
-## Bước 2: Deploy backend lên Railway
-```bash
-cd oauth_backend
-git init
-git add .
-git commit -m "init oauth backend"
-gh repo create oauth-backend --private --source=. --push
-```
-Sau đó vào Railway → New Project → Deploy from GitHub repo → chọn repo `oauth-backend`.
-
-Trong Railway, vào tab **Variables**, thêm:
-```
-GITHUB_CLIENT_ID=<client id bước 1>
-GITHUB_CLIENT_SECRET=<client secret bước 1>
-```
-
-Railway sẽ cho bạn 1 URL dạng `https://oauth-backend-production.up.railway.app` — copy lại URL này.
-
-## Bước 3: Cập nhật thông tin trong app Flutter
-Mở file `github_downloader/lib/services/auth_service.dart`, sửa 2 dòng:
-```dart
-static const String clientId = 'YOUR_GITHUB_CLIENT_ID'; // dán Client ID vào đây
-static const String backendUrl = 'https://your-backend.up.railway.app'; // dán URL Railway vào đây (không có dấu / cuối)
-```
-
-## Bước 4: Đẩy code Flutter lên GitHub (qua Termux)
-```bash
-cd github_downloader
-git init
-git add .
-git commit -m "init github downloader app"
-gh repo create github-downloader --private --source=. --push
-```
-
-## Bước 5: Lấy APK
-1. Vào repo trên GitHub → tab **Actions**
-2. Workflow "Build APK" sẽ tự chạy sau khi push (mất khoảng 3-5 phút)
-3. Khi chạy xong (dấu tích xanh) → bấm vào lần chạy đó → phần **Artifacts** ở cuối trang → tải file `github-downloader-apk`
-4. Giải nén, cài file `.apk` trực tiếp trên điện thoại (cần bật "Cho phép cài từ nguồn không xác định" trong Settings)
+## Cài đặt từ đầu (chỉ cần làm nếu bạn dựng bản của riêng mình)
+1. **Tạo GitHub OAuth App** tại https://github.com/settings/developers → *New OAuth App*. Điền *Authorization callback URL* là `githubdownloader://callback`. Lấy **Client ID**, rồi bấm *Generate a new client secret* để lấy **Client Secret** (chỉ hiện 1 lần, lưu lại ngay).
+2. **Deploy server đổi mã đăng nhập** (repo riêng) lên Railway, thêm 2 biến môi trường `GITHUB_CLIENT_ID` và `GITHUB_CLIENT_SECRET`. Server này chỉ có một việc: đổi `code` lấy `access_token`, để `client_secret` không bao giờ nằm trong app.
+3. **Điền thông tin vào app**: mở `lib/services/auth_service.dart`, sửa `clientId` và `backendUrl` (không có dấu `/` cuối). Bản trong repo đã điền sẵn giá trị của tác giả.
+4. **Tạo secret cho khoá ký APK**: workflow dùng 1 keystore cố định để mọi bản build cài đè lên nhau được. Tạo bằng lệnh (Termux có sẵn `keytool` nếu đã cài JDK):
+   ```bash
+   keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey \
+     -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+   base64 -w0 debug.keystore
+   ```
+   Dán kết quả vào secret tên `DEBUG_KEYSTORE_BASE64` của repo (Settings → Secrets and variables → Actions).
+5. **Đẩy code lên GitHub.** Workflow *Build APK* tự chạy (khoảng 3–5 phút). Khi xong, vào lần chạy đó → mục *Artifacts* → tải `github-downloader-apk`, giải nén rồi cài file `.apk` (cần bật "Cho phép cài từ nguồn không xác định").
 
 ## Lưu ý bảo mật
-- Token GitHub được lưu bằng `flutter_secure_storage` (Android Keystore), không lưu dạng chữ thường.
-- `client_secret` chỉ nằm trên server Railway, không bao giờ có trong app hay repo Flutter.
-- Nếu muốn thu hồi quyền truy cập bất cứ lúc nào: GitHub → Settings → Applications → Authorized OAuth Apps → Revoke.
-- Repo public tải được ngay không cần đăng nhập gì cả — chỉ khi vào repo private mới cần token (sau khi đăng nhập).
-
-## Muốn mở rộng thêm?
-Nói mình biết nếu muốn thêm: tìm kiếm repo qua tên, hiển thị danh sách repo của user đăng nhập thay vì nhập tay owner/repo, tải nguyên thư mục dạng zip, hoặc dark mode.
+- Token GitHub chỉ lưu trong `flutter_secure_storage` (kho mã hoá của Android). Tính năng theo dõi CI chạy nền cũng đọc token từ kho này mỗi lần kiểm tra, **không** giữ bản sao nào ở nơi lưu chữ thường.
+- Đăng xuất sẽ: tắt theo dõi CI nền, làm trống widget màn hình chính, xoá bộ nhớ đệm trong RAM, rồi xoá thông tin đăng nhập. Cài đặt và danh sách repo đã ghim được giữ lại.
+- `client_secret` chỉ nằm trên server, không có trong app hay repo này.
+- Thu hồi quyền bất cứ lúc nào: GitHub → Settings → Applications → Authorized OAuth Apps → Revoke.
+- Repo public duyệt/tải được không cần đăng nhập; repo private cần token.

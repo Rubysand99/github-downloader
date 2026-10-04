@@ -23,6 +23,12 @@ class CiStatusWidgetProvider : HomeWidgetProvider() {
         appWidgetIds.forEach { widgetId ->
             val views = RemoteViews(context.packageName, R.layout.ci_status_widget)
 
+            // Chữ tiêu đề/"trống" do phía Dart gửi sang (theo ngôn ngữ đang chọn trong
+            // app, xem WidgetService._push). Giá trị sau dấu phẩy là mặc định khi
+            // app chưa gửi lần nào.
+            views.setTextViewText(R.id.ci_widget_title, widgetData.getString("ci_widget_title", "Build CI/CD"))
+            views.setTextViewText(R.id.ci_widget_empty, widgetData.getString("ci_widget_empty", "Mở app để xem trạng thái build"))
+
             // ListView trong widget là 1 "collection" - KHÔNG thể set item trực
             // tiếp như RemoteViews thường, phải trỏ tới 1 RemoteViewsService để
             // Android tự gọi lại lấy dữ liệu (xem CiStatusWidgetService.kt).

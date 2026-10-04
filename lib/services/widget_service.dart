@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:home_widget/home_widget.dart';
+import '../l10n/strings.dart';
 import 'auth_service.dart';
 import 'github_service.dart';
 import 'pinned_repos_service.dart';
@@ -19,10 +20,13 @@ class WidgetService {
     if (!Platform.isAndroid) return;
     try {
       final token = await AuthService().getToken();
-      if (token == null) return;
-
-      final pinned = await PinnedReposService().getPinned();
-      if (pinned.isEmpty) return;
+      // Chưa đăng nhập hoặc đã bỏ ghim hết -> làm trống widget (trước đây hàm
+      // thoát sớm nên widget giữ nguyên danh sách cũ, kể cả sau khi bỏ ghim).
+      final pinned = token == null ? <String>{} : await PinnedReposService().getPinned();
+      if (token == null || pinned.isEmpty) {
+        await _push(const []);
+        return;
+      }
 
       final service = GithubService(token: token);
       final items = <Map<String, String>>[];
@@ -46,15 +50,34 @@ class WidgetService {
         }
       }));
 
-      items.sort((a, b) => a['repo']!.compareTo(b['repo']!));
+      // Mất mạng làm TẤT CẢ repo lỗi -> giữ nguyên dữ liệu cũ thay vì xoá trắng widget.
+      if (items.isEmpty) return;
 
-      await HomeWidget.saveWidgetData<String>('ci_widget_repos', jsonEncode(items));
-      await HomeWidget.updateWidget(
-        androidName: _androidProviderClass,
-        qualifiedAndroidName: _qualifiedAndroidName,
-      );
+      items.sort((a, b) => a['repo']!.compareTo(b['repo']!));
+      await _push(items);
     } catch (_) {
       // Lỗi cập nhật widget không được làm ảnh hưởng tới trải nghiệm chính của app.
     }
+  }
+
+  /// Xoá sạch dữ liệu trên widget (gọi khi đăng xuất, để tên repo private không
+  /// còn nằm trên màn hình chính của máy).
+  static Future<void> clear() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _push(const []);
+    } catch (_) {}
+  }
+
+  static Future<void> _push(List<Map<String, String>> items) async {
+    // Chữ trên widget do Dart gửi sang (theo ngôn ngữ đang chọn trong app) vì
+    // phần Kotlin của widget không biết ngôn ngữ chọn trong app.
+    await HomeWidget.saveWidgetData<String>('ci_widget_title', t('ci.widget_title'));
+    await HomeWidget.saveWidgetData<String>('ci_widget_empty', t('ci.widget_empty'));
+    await HomeWidget.saveWidgetData<String>('ci_widget_repos', jsonEncode(items));
+    await HomeWidget.updateWidget(
+      androidName: _androidProviderClass,
+      qualifiedAndroidName: _qualifiedAndroidName,
+    );
   }
 }

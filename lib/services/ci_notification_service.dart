@@ -1,4 +1,5 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import '../l10n/strings.dart';
 
 /// Gửi notification RIÊNG BIỆT (khác với notification "dịch vụ đang chạy nền"
 /// của flutter_foreground_task ở keep_alive_service.dart) mỗi khi 1 build
@@ -15,8 +16,6 @@ class CiNotificationService {
   CiNotificationService._internal();
 
   static const _channelId = 'ci_build_alerts';
-  static const _channelName = 'Kết quả build CI/CD';
-  static const _channelDescription = 'Báo khi 1 build CI/CD của repo đã ghim hoàn tất (thành công/thất bại).';
 
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
@@ -58,8 +57,8 @@ class CiNotificationService {
     if (!_initialized) await init();
     final androidDetails = AndroidNotificationDetails(
       _channelId,
-      _channelName,
-      channelDescription: _channelDescription,
+      t('ci.channel_name'),
+      channelDescription: t('ci.channel_desc'),
       importance: Importance.max,
       priority: Priority.high,
     );
@@ -69,7 +68,7 @@ class CiNotificationService {
     // notification), nhưng KHÔNG đè lên notification của repo khác.
     await _plugin.show(
       repoFullName.hashCode & 0x7fffffff,
-      success ? '✅ Build xong: $repoFullName' : '⚠️ Build lỗi: $repoFullName',
+      t(success ? 'ci.build_ok' : 'ci.build_fail', {'repo': repoFullName}),
       runName,
       details,
       payload: repoFullName,

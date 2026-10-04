@@ -108,7 +108,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await CiWatchService.instance.disable();
       return;
     }
-    final ok = await CiWatchService.instance.enable();
+    // resetBaseline: người dùng vừa TỰ bật -> bắt đầu "mốc" mới, không báo dồn build cũ.
+    final ok = await CiWatchService.instance.enable(resetBaseline: true);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('settings.ci_watch_no_pins'))));
     }

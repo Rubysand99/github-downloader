@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'log_service.dart';
 import 'keep_alive_service.dart';
+import 'downloads_service.dart';
 import '../l10n/strings.dart';
 
 class DownloadTask {
@@ -84,7 +85,14 @@ class DownloadManager extends ChangeNotifier {
           // onError, khiến tác vụ biến mất khỏi thanh tiến độ mà người dùng không
           // hề biết là đã thất bại.
           LogService.instance.error('Tải xong nhưng LƯU thất bại: $label (${bytes.length} byte)');
-          if (ctx != null) onError(ctx, t('common.save_failed'));
+          if (ctx != null) {
+            // Kèm lý do thật (nếu có) để người dùng/dev biết vì sao không lưu được.
+            final reason = DownloadsService.lastError;
+            onError(
+              ctx,
+              reason == null ? t('common.save_failed') : t('common.save_failed_reason', {'reason': reason}),
+            );
+          }
         }
       } catch (e) {
         _finish(id);

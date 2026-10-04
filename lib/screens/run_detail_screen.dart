@@ -183,7 +183,7 @@ class _RunDetailScreenState extends State<RunDetailScreen> {
             zipBytes[1] == 0x4B &&
             (zipBytes[2] == 0x03 || zipBytes[2] == 0x05 || zipBytes[2] == 0x07);
         if (!isValidZip) {
-          throw Exception('Dữ liệu tải về không đúng định dạng zip (có thể do lỗi mạng hoặc link đã hết hạn)');
+          throw Exception(t('rundetail.invalid_zip'));
         }
 
         final archive = ZipDecoder().decodeBytes(zipBytes);

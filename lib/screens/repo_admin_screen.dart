@@ -100,7 +100,7 @@ class _RepoAdminScreenState extends State<RepoAdminScreen> with SingleTickerProv
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: permission,
+                initialValue: permission,
                 decoration: InputDecoration(labelText: t('admin.permission_label'), border: const OutlineInputBorder()),
                 items: _permissions.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
                 onChanged: (v) => setDialogState(() => permission = v ?? permission),

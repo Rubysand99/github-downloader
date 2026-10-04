@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../l10n/strings.dart';
+import 'app_settings.dart';
 import 'log_service.dart';
 import 'github_service.dart';
 import 'ci_notification_service.dart';
@@ -12,6 +15,11 @@ void _startForegroundCallback() {
   FlutterForegroundTask.setTaskHandler(_AppTaskHandler());
 }
 
+/// Run vừa xong mà service CHƯA từng thấy nó đang chạy (vd build rất nhanh, xong
+/// giữa 2 lần poll) chỉ được báo nếu run đó mới được tạo trong khoảng này. Tránh
+/// báo dồn hàng loạt build cũ khi service vừa sống lại sau thời gian dài tắt.
+const _maxLateNotifyAge = Duration(minutes: 10);
+
 /// TaskHandler DÙNG CHUNG cho MỌI lý do khiến app cần 1 foreground service (giữ
 /// app sống khi tải file, và/hoặc theo dõi CI/CD nền). Dùng chung 1 handler duy
 /// nhất - thay vì 1 handler riêng cho mỗi mục đích - vì flutter_foreground_task
@@ -20,7 +28,15 @@ void _startForegroundCallback() {
 /// được TaskHandler đang hoạt động, nên việc polling CI phải nằm sẵn trong CÙNG
 /// 1 handler, tự đọc cờ mỗi lần được gọi để quyết định có poll hay không.
 class _AppTaskHandler extends TaskHandler {
-  Map<String, String> _knownRunConclusions = {};
+  // Trạng thái đã biết của từng lần chạy: "repo#runId" -> 'running' (chưa xong)
+  // hoặc kết luận cuối ('success', 'failure', ...).
+  Map<String, String> _knownRuns = {};
+  // Các repo ĐÃ được quét ít nhất 1 lần ("mốc"). Lần quét đầu của 1 repo chỉ ghi
+  // nhận, không báo, để khỏi báo dồn toàn bộ lịch sử build cũ.
+  Set<String> _baselinedRepos = {};
+  // Số phiên bản của dữ liệu trên kho; đổi nghĩa là main isolate vừa bật/tắt/xoá
+  // trạng thái (xem CiWatchService._resetState) -> phải nạp lại từ kho.
+  String _loadedEpoch = '';
   bool _isPolling = false;
 
   @override
@@ -29,14 +45,28 @@ class _AppTaskHandler extends TaskHandler {
     // giải thích ở ci_notification_service.dart. Không truyền onTap vì tap
     // lúc app đã bị giết hẳn được main.dart tự xử lý lúc khởi động lại.
     await CiNotificationService.instance.init();
+    await _reloadState();
+  }
 
-    final saved = await FlutterForegroundTask.getData<String>(key: 'ci_known_runs');
-    if (saved == null) return;
-    try {
-      final decoded = jsonDecode(saved) as Map;
-      _knownRunConclusions = decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
-    } catch (_) {
-      // Dữ liệu cũ hỏng/không đọc được - bỏ qua, bắt đầu lại từ đầu.
+  Future<void> _reloadState() async {
+    _loadedEpoch = await FlutterForegroundTask.getData<String>(key: 'ci_watch_epoch') ?? '';
+    _knownRuns = {};
+    _baselinedRepos = {};
+
+    final savedRuns = await FlutterForegroundTask.getData<String>(key: 'ci_known_runs');
+    if (savedRuns != null && savedRuns.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(savedRuns) as Map;
+        _knownRuns = decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+      } catch (_) {
+        // Dữ liệu cũ hỏng/không đọc được - bỏ qua, bắt đầu lại từ đầu.
+      }
+    }
+    final savedRepos = await FlutterForegroundTask.getData<String>(key: 'ci_baselined_repos');
+    if (savedRepos != null && savedRepos.isNotEmpty) {
+      try {
+        _baselinedRepos = Set<String>.from(jsonDecode(savedRepos) as List);
+      } catch (_) {}
     }
   }
 
@@ -55,7 +85,12 @@ class _AppTaskHandler extends TaskHandler {
       final enabled = await FlutterForegroundTask.getData<String>(key: 'ci_watch_enabled');
       if (enabled != 'true') return;
 
-      final token = await FlutterForegroundTask.getData<String>(key: 'ci_watch_token');
+      final epoch = await FlutterForegroundTask.getData<String>(key: 'ci_watch_epoch') ?? '';
+      if (epoch != _loadedEpoch) await _reloadState();
+
+      // Token đọc TRỰC TIẾP từ kho mã hoá mỗi lần poll (không còn sao chép sang
+      // nơi lưu chữ thường). Tên khoá phải trùng với AuthService._kToken.
+      final token = await const FlutterSecureStorage().read(key: 'github_token');
       final reposJson = await FlutterForegroundTask.getData<String>(key: 'ci_watch_repos');
       if (token == null || token.isEmpty || reposJson == null) return;
 
@@ -75,49 +110,79 @@ class _AppTaskHandler extends TaskHandler {
         if (parts.length != 2) continue;
         try {
           final runs = await service.listWorkflowRuns(parts[0], parts[1]);
+          final isBaselined = _baselinedRepos.contains(fullName);
+
           for (final run in runs.take(5)) {
-            if (run.status != 'completed') continue;
             final key = '$fullName#${run.id}';
-            final conclusion = run.conclusion ?? 'unknown';
-            final prev = _knownRunConclusions[key];
+            final completed = run.status == 'completed';
+            // Run chưa xong cũng được GHI NHẬN là 'running'. Trước đây code bỏ qua
+            // mọi run chưa xong, nên run chỉ được thấy lần đầu khi đã xong -> bị
+            // coi là "mốc" và KHÔNG BAO GIỜ báo; thông báo chỉ kêu khi kết luận
+            // của 1 run đã xong bị đổi, gần như không xảy ra.
+            final state = completed ? (run.conclusion ?? 'unknown') : 'running';
+            final prev = _knownRuns[key];
+            if (prev == state) continue; // không có gì mới
+
+            _knownRuns[key] = state;
+            changed = true;
+
+            if (!isBaselined) continue; // lần quét đầu của repo này: chỉ ghi mốc
+            if (!completed) continue; // vừa bắt đầu chạy: chưa có kết quả để báo
+
             if (prev == null) {
-              // Lần đầu thấy run này (mới bật tính năng, hoặc service vừa khởi
-              // động lại) - chỉ ghi nhận làm mốc so sánh, KHÔNG báo, để tránh
-              // báo dồn dập toàn bộ lịch sử build cũ ngay khi vừa bật.
-              _knownRunConclusions[key] = conclusion;
-              changed = true;
-            } else if (prev != conclusion) {
-              _knownRunConclusions[key] = conclusion;
-              changed = true;
-              final ok = conclusion == 'success';
-              // Gửi notification RIÊNG, có âm thanh (xem ci_notification_service.dart)
-              // - KHÔNG dùng FlutterForegroundTask.updateService() nữa vì kênh đó
-              // Importance.LOW (không kêu) và sẽ đè mất dòng "Đang theo dõi CI/CD"
-              // của thông báo dịch vụ nền cho tới khi bật/tắt lại tính năng.
-              await CiNotificationService.instance.showBuildResult(
-                repoFullName: fullName,
-                success: ok,
-                runName: run.name,
-              );
+              // Chưa từng thấy run này mà đã xong (build nhanh, xong giữa 2 lần poll).
+              final age = DateTime.now().toUtc().difference(run.createdAt.toUtc());
+              if (age > _maxLateNotifyAge) continue; // quá cũ, không báo
             }
+            await _notifyBuildResult(fullName, run, state == 'success');
           }
+
+          if (!isBaselined) {
+            _baselinedRepos.add(fullName);
+            changed = true;
+          }
+        } on GithubUnauthorizedException {
+          // Token đã hết hạn/bị thu hồi: dừng theo dõi thay vì gọi lỗi mỗi phút.
+          // Mở app lại, nếu vẫn đăng nhập thì main.dart tự bật lại (còn đã hết
+          // hạn thì màn danh sách repo sẽ tự đăng xuất).
+          LogService.instance.warn('CiWatch: token không còn hợp lệ, dừng theo dõi');
+          await FlutterForegroundTask.saveData(key: 'ci_watch_enabled', value: 'false');
+          return;
         } catch (e) {
           LogService.instance.warn('CiWatch: lỗi kiểm tra $fullName: $e');
         }
       }
 
       // Giới hạn kích thước lưu trữ, tránh phình to vô hạn qua thời gian dài.
-      if (_knownRunConclusions.length > 300) {
-        final entries = _knownRunConclusions.entries.toList();
-        _knownRunConclusions = Map.fromEntries(entries.sublist(entries.length - 300));
+      if (_knownRuns.length > 300) {
+        final entries = _knownRuns.entries.toList();
+        _knownRuns = Map.fromEntries(entries.sublist(entries.length - 300));
         changed = true;
       }
       if (changed) {
-        await FlutterForegroundTask.saveData(key: 'ci_known_runs', value: jsonEncode(_knownRunConclusions));
+        await FlutterForegroundTask.saveData(key: 'ci_known_runs', value: jsonEncode(_knownRuns));
+        await FlutterForegroundTask.saveData(key: 'ci_baselined_repos', value: jsonEncode(_baselinedRepos.toList()));
       }
     } catch (e) {
       LogService.instance.warn('CiWatch: lỗi polling: $e');
     }
+  }
+
+  Future<void> _notifyBuildResult(String fullName, WorkflowRun run, bool success) async {
+    // Nạp lại cài đặt để thông báo đúng NGÔN NGỮ người dùng đang chọn (isolate
+    // nền này có AppSettings riêng, mặc định tiếng Việt cho tới khi được nạp).
+    try {
+      await AppSettings.instance.load();
+    } catch (_) {}
+    // Gửi notification RIÊNG, có âm thanh (xem ci_notification_service.dart)
+    // - KHÔNG dùng FlutterForegroundTask.updateService() vì kênh đó
+    // Importance.LOW (không kêu) và sẽ đè mất dòng "Đang theo dõi CI/CD"
+    // của thông báo dịch vụ nền cho tới khi bật/tắt lại tính năng.
+    await CiNotificationService.instance.showBuildResult(
+      repoFullName: fullName,
+      success: success,
+      runName: run.name,
+    );
   }
 
   @override
@@ -172,8 +237,8 @@ class KeepAliveService {
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
           channelId: 'app_background_service',
-          channelName: 'Dịch vụ nền',
-          channelDescription: 'Hiện khi app đang tải file hoặc theo dõi CI/CD nền.',
+          channelName: t('ci.service_channel_name'),
+          channelDescription: t('ci.service_channel_desc'),
           channelImportance: NotificationChannelImportance.LOW,
           priority: NotificationPriority.LOW,
         ),
@@ -249,14 +314,14 @@ class KeepAliveService {
 
   /// Gọi khi bắt đầu có tác vụ tải chạy nền.
   Future<void> startKeepAlive({required String label}) =>
-      _enqueue(() => _startForReason('download', title: 'Đang tải file', text: label));
+      _enqueue(() => _startForReason('download', title: t('ci.service_downloading'), text: label));
 
   /// Gọi khi không còn tác vụ tải nào đang chạy.
   Future<void> stopKeepAliveIfIdle() => _enqueue(() => _stopReason('download'));
 
   /// Gọi khi bật tính năng theo dõi CI/CD nền.
   Future<void> startCiWatch({required String label}) =>
-      _enqueue(() => _startForReason('ci_watch', title: 'Đang theo dõi CI/CD', text: label));
+      _enqueue(() => _startForReason('ci_watch', title: t('ci.service_watching'), text: label));
 
   /// Gọi khi tắt tính năng theo dõi CI/CD nền.
   Future<void> stopCiWatch() => _enqueue(() => _stopReason('ci_watch'));

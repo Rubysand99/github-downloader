@@ -11,10 +11,22 @@ import 'notifications_screen.dart';
 import 'gists_screen.dart';
 import 'pinned_search_screen.dart';
 import '../services/ci_watch_service.dart';
+import '../services/session_cache.dart';
 
 /// Cache đơn giản trong bộ nhớ, tồn tại trong suốt phiên chạy app.
 class _RepoCache {
-  static List<GithubRepo>? repos;
+  static List<GithubRepo>? _repos;
+  static bool _registered = false;
+
+  static List<GithubRepo>? get repos => _repos;
+  static set repos(List<GithubRepo>? value) {
+    // Đăng ký để SessionCache.clearAll() (gọi lúc đăng xuất) xoá được cache này.
+    if (!_registered) {
+      _registered = true;
+      SessionCache.register(() => _repos = null);
+    }
+    _repos = value;
+  }
 }
 
 /// 1 dòng trong danh sách đã nhóm: hoặc là tiêu đề nhóm (headerLabel != null),
@@ -173,9 +185,15 @@ class _RepoListScreenState extends State<RepoListScreen> {
   }
 
   Future<void> _logout() async {
-    await _authService.logout();
+    await _authService.logout(); // đã xoá sạch cache + dịch vụ nền, xem AuthService.logout
     _RepoCache.repos = null;
-    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    if (!mounted) return;
+    // Trước đây chỉ popUntil(isFirst): màn danh sách repo này CHÍNH LÀ màn đầu
+    // tiên nên bấm Đăng xuất không có tác dụng nhìn thấy được. Phải thay hẳn stack.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   void _openRepo(GithubRepo repo) {
@@ -257,7 +275,7 @@ class _RepoListScreenState extends State<RepoListScreen> {
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  value: gitignoreTemplate,
+                  initialValue: gitignoreTemplate,
                   decoration: InputDecoration(labelText: t('repolist.gitignore_label'), border: const OutlineInputBorder()),
                   items: gitignoreOptions.keys
                       .map((k) => DropdownMenuItem(value: k, child: Text(k.isEmpty ? t('repolist.template_none') : k)))
@@ -266,7 +284,7 @@ class _RepoListScreenState extends State<RepoListScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: licenseTemplate,
+                  initialValue: licenseTemplate,
                   decoration: InputDecoration(labelText: t('repolist.license_label'), border: const OutlineInputBorder()),
                   items: licenseOptions.keys
                       .map((k) => DropdownMenuItem(value: k, child: Text(k.isEmpty ? t('repolist.template_none') : k)))
