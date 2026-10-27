@@ -11,7 +11,7 @@ import 'widget_service.dart';
 class AuthService {
   static const String clientId = 'Ov23liXVhIzWQiZDPVmF';
 
-  static const String backendUrl = 'https://oauth-backend-production-99e7.up.railway.app';
+  static const String backendUrl = 'https://oauth-backend-nk0t.onrender.com';
 
   // Tên các khoá lưu thông tin đăng nhập trong kho mã hoá. logout() chỉ xoá đúng
   // những khoá này (không xoá cài đặt, repo đã ghim... lưu cùng kho).
