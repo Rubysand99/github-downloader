@@ -9,7 +9,7 @@ import 'session_cache.dart';
 import 'widget_service.dart';
 
 class AuthService {
-  static const String clientId = 'Ov23liwbI2dUbJoBSMAv';
+  static const String clientId = 'Ov23liXVhIzWQiZDPVmF';
 
   static const String backendUrl = 'https://oauth-backend-production-99e7.up.railway.app';
 
