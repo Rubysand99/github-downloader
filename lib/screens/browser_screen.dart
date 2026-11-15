@@ -6,6 +6,7 @@ import '../services/github_service.dart';
 import '../services/downloads_service.dart';
 import '../services/download_manager.dart';
 import '../l10n/strings.dart';
+import '../utils/repo_input.dart';
 import '../widgets/top_notification.dart';
 import '../main.dart' show navigatorKey;
 import 'login_screen.dart';
@@ -192,7 +193,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _loadRepo() async {
-    if (_ownerController.text.isEmpty || _repoController.text.isEmpty) return;
+    // Chấp nhận dán nguyên URL / "owner/repo" / tên có đuôi ".git" vào 2 ô nhập.
+    final ref = normalizeRepoInput(_ownerController.text, _repoController.text);
+    _ownerController.text = ref.owner;
+    _repoController.text = ref.repo;
+    if (ref.owner.isEmpty || ref.repo.isEmpty) return;
     setState(() {
       _currentBranch = null; // mở repo mới (khác trước đó) - quay về default branch
       _branches = [];

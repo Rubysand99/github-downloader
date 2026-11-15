@@ -558,6 +558,17 @@ class GithubService {
     }
   }
 
+  bool _isEmptyRepoResponse(http.Response response) {
+    if (response.statusCode != 404 && response.statusCode != 409) return false;
+    try {
+      final body = jsonDecode(response.body);
+      final message = body is Map ? body['message']?.toString().toLowerCase() : null;
+      return message != null && message.contains('empty');
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Liệt kê TẤT CẢ repo mà tài khoản đang đăng nhập có quyền truy cập
   /// (sở hữu, được thêm làm collaborator, hoặc thuộc tổ chức), kèm quyền hạn cụ thể.
   /// Tự động lấy hết các trang (phân trang) qua header 'Link' của GitHub.
@@ -601,6 +612,9 @@ class GithubService {
       final query = ref != null ? <String, String>{'ref': ref} : null;
       final url = Uri.https('api.github.com', '/repos/$owner/$repo/contents/$path', query);
       final response = await http.get(url, headers: _headers);
+      // Repo trống (chưa có commit nào): GitHub trả 404 "This repository is empty."
+      // thay vì danh sách rỗng - coi đây là repo hợp lệ không có file, không phải lỗi.
+      if (path.isEmpty && _isEmptyRepoResponse(response)) return <GithubFile>[];
       _checkStatus(response, t('err.contents'));
 
       final List data = jsonDecode(response.body);
