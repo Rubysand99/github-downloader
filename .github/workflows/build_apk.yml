@@ -20,10 +20,30 @@ jobs:
       # Nếu không có bước này, mỗi bản APK có chữ ký khác nhau -> Android bắt
       # gỡ cài đặt bản cũ trước khi cài bản mới -> mất sạch dữ liệu app (kể cả
       # token đăng nhập GitHub đã lưu) -> phải đăng nhập lại mỗi lần cập nhật app.
+      #
+      # Nếu secret DEBUG_KEYSTORE_BASE64 trống/không hợp lệ thì KHÔNG để lại file
+      # keystore rỗng/hỏng (AGP mới sẽ báo "Failed to read key AndroidDebugKey ...
+      # Tag number over 30 is not supported" và build thất bại) mà tự tạo 1
+      # keystore debug mới đúng định dạng. Lúc đó chữ ký đổi mỗi lần build -> để
+      # giữ chữ ký ổn định, hãy thêm lại secret DEBUG_KEYSTORE_BASE64.
       - name: Khôi phục debug keystore cố định
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           mkdir -p ~/.android
-          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          rm -f ~/.android/debug.keystore
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore || true
+          fi
+          if ! keytool -list -keystore ~/.android/debug.keystore -storepass android -alias AndroidDebugKey > /dev/null 2>&1; then
+            echo "::warning::DEBUG_KEYSTORE_BASE64 trống hoặc không hợp lệ - tạo debug keystore MỚI (chữ ký APK sẽ khác bản cài trước đó)."
+            rm -f ~/.android/debug.keystore
+            keytool -genkeypair -keystore ~/.android/debug.keystore -storetype JKS \
+              -storepass android -keypass android -alias AndroidDebugKey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          keytool -list -keystore ~/.android/debug.keystore -storepass android -alias AndroidDebugKey
 
       - name: Tạo scaffold Android (nếu chưa có sẵn trong repo)
         run: |
